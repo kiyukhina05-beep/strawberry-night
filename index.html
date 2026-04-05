@@ -1,0 +1,240 @@
+HTML
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Strawberry Nightmare: Final Deluxe</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
+        #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; }
+        #status-box { position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.8); color: #fff; padding: 15px; border-left: 5px solid #ff0044; pointer-events: auto; }
+        #clock { position: absolute; top: 20px; right: 20px; color: #ff0000; font-size: 35px; font-weight: bold; background: black; padding: 10px; border: 3px solid red; }
+        #hints { position: absolute; bottom: 0; width: 100%; text-align: center; color: #fff; background: rgba(0,0,0,0.8); padding: 10px 0; font-size: 14px; }
+
+        /* ОКНО И ЮНГИ */
+        #yoongi-window-layer {
+            position: absolute; width: 140px; height: 180px;
+            z-index: 5; display: none; pointer-events: none;
+            overflow: hidden; border: 2px solid #000;
+        }
+        #yoongi-img { width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.3s; }
+
+        /* СКРИМЕР */
+        #scare-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: black; display: none; z-index: 100; text-align: center; }
+        #berry-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 110; display: none; }
+        #scare-content { position: relative; z-index: 120; top: 40%; transform: translateY(-50%); }
+        #scare-text { font-size: 28px; font-weight: bold; color: #ff0044; text-shadow: 0 0 20px black; animation: shake 0.05s infinite; margin-bottom: 30px; }
+        @keyframes shake { 0% { transform: translate(3px, 3px); } 50% { transform: translate(-3px, -3px); } }
+        .retry-btn { pointer-events: auto; padding: 15px 30px; font-size: 18px; cursor: pointer; background: #ff0044; color: white; border: none; border-radius: 5px; }
+        
+        #win-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #ffeef2; display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 200; }
+    </style>
+</head>
+<body>
+
+    <div id="yoongi-window-layer"><img id="yoongi-img" src="yoongi.jpg"></div>
+
+    <div id="ui">
+        <div id="status-box"><p id="status" style="margin:0">КЛИКНИ, ЧТОБЫ ВОЙТИ В КЛУБНИЧНУЮ КОМНАТУ...</p></div>
+        <div id="clock">00:00</div>
+        <div id="hints">МЫШЬ: Поворот | КЛИК: Идти | ПРОБЕЛ: Прятаться (Юнги не должен тебя видеть!)</div>
+    </div>
+
+    <div id="scare-overlay">
+        <img id="berry-img" src="strawberry.jpg">
+        <div id="scare-content">
+            <div id="scare-text">ЧИМИНИ... <br> ОТКРОЙ РОТИК, СЪЕШЬ КЛУБНИЧКУ ЗА ПАПОЧКУ...</div>
+            <button class="retry-btn" onclick="location.reload()">ПОПРОБОВАТЬ СНОВА</button>
+        </div>
+    </div>
+
+    <div id="win-screen">
+        <h1 style="font-size: 80px; color: #ff0044;">06:00</h1>
+        <h2 style="color: #333;">ВЫЖИЛА! ЮНГИ УШЕЛ... КУШАТЬ ТОРТ.</h2>
+        <button class="retry-btn" onclick="location.reload()">ИГРАТЬ ЕЩЕ РАЗ</button>
+    </div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        let scene, camera, renderer, audioCtx, bgMusic;
+        let isGameOver = false, isHidden = false, win = false, gameStarted = false;
+        let hour = 0, minute = 0, lon = 0, lat = 0;
+        let targetPos = new THREE.Vector3(0, 1.6, 3);
+        let mouseX = 0, mouseY = 0;
+
+        init();
+        animate();
+
+        function init() {
+            scene = new THREE.Scene();
+            
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.copy(targetPos);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const light = new THREE.PointLight(0xffddaa, 1.5, 15);
+            light.position.set(0, 4, 2); scene.add(light);
+
+            // ТЕКСТУРА КЛУБНИЧНЫХ ОБОЕВ (Procedural)
+            const canvas = document.createElement('canvas');
+            canvas.width = 128; canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#fcefb2'; ctx.fillRect(0,0,128,128);
+            ctx.fillStyle = '#ff0044'; 
+            ctx.beginPath(); ctx.arc(64,64,8,0,Math.PI*2); ctx.fill(); // Клубничка-точка
+            const wallTex = new THREE.CanvasTexture(canvas);
+            wallTex.repeat.set(5, 3); wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
+
+            const wallMat = new THREE.MeshStandardMaterial({ map: wallTex });
+            const room = new THREE.Mesh(new THREE.BoxGeometry(10, 6, 10), wallMat);
+            room.material.side = THREE.BackSide; scene.add(room);
+
+            // ПОЛ
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(10,10), new THREE.MeshStandardMaterial({color: 0x4a2c10}));
+            floor.rotation.x = -Math.PI/2; scene.add(floor);
+
+            // КРОВАТЬ С ПОСТЕЛЬНЫМ БЕЛЬЕМ
+            const bedBase = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.6, 4), new THREE.MeshStandardMaterial({color: 0x2b1d0e}));
+            bedBase.position.set(3.5, 0.3, -1); scene.add(bedBase);
+            
+            const linenCanvas = document.createElement('canvas');
+            linenCanvas.width = 64; linenCanvas.height = 64;
+            const lCtx = linenCanvas.getContext('2d');
+            lCtx.fillStyle = '#ff0044'; lCtx.fillRect(0,0,64,64);
+            lCtx.fillStyle = '#ffffff'; lCtx.beginPath(); lCtx.arc(32,32,10,0,Math.PI*2); lCtx.fill();
+            const linenTex = new THREE.CanvasTexture(linenCanvas);
+            linenTex.repeat.set(4, 8); linenTex.wrapS = linenTex.wrapT = THREE.RepeatWrapping;
+
+            const sheet = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.2, 4.1), new THREE.MeshStandardMaterial({map: linenTex}));
+            sheet.position.set(3.5, 0.7, -1); scene.add(sheet);
+
+            // ШКАФ И ПОЛКА
+            const box = (w,h,d,x,y,z,col) => {
+                const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshStandardMaterial({color: col}));
+                m.position.set(x, y, z); scene.add(m); return m;
+            };
+            box(1.5, 3.5, 1.2, -4, 1.75, -2, 0x2b1d0e); 
+            box(2.5, 0.1, 0.6, -3.5, 2.2, 2, 0x1a1108); // Полка
+
+            // РАМА ОКНА
+            box(2.4, 2.9, 0.2, 0, 1.8, -4.95, 0x000000); 
+
+            window.addEventListener('mousemove', (e) => {
+                mouseX = (e.clientX / window.innerWidth) - 0.5;
+                mouseY = (e.clientY / window.innerHeight) - 0.5;
+            });
+            document.getElementById('status-box').addEventListener('mousedown', start);
+            window.addEventListener('mousedown', () => { if(gameStarted) move(); });
+            window.addEventListener('keydown', (e) => { if(e.code === 'Space') { isHidden = true; targetPos.y = 0.8; }});
+            window.addEventListener('keyup', (e) => { if(e.code === 'Space') { isHidden = false; targetPos.y = 1.6; }});
+        }
+
+        function playNote(freq, type, startTime, duration, volume) {
+            const osc = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, startTime);
+            g.gain.setValueAtTime(volume, startTime);
+            g.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+            osc.connect(g); g.connect(audioCtx.destination);
+            osc.start(startTime); osc.stop(startTime + duration);
+        }
+
+        function start() {
+            if(gameStarted) return;
+            gameStarted = true;
+            document.getElementById('status').innerText = "Как тут мило... и жутко.";
+            document.getElementById('yoongi-window-layer').style.display = 'block';
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            
+            // Фоновая мелодия (Шкатулка)
+            const melody = [440, 493, 523, 587, 659];
+            let i = 0;
+            bgMusic = setInterval(() => {
+                if(!isGameOver && !win) playNote(melody[i % 5], 'sine', audioCtx.currentTime, 1, 0.05);
+                i++;
+            }, 800);
+
+            setInterval(tick, 1500); 
+            setTimeout(attack, 8000); setTimeout(attack, 24000); setTimeout(attack, 42000);
+        }
+
+        function move() {
+            if(isGameOver || win) return;
+            const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+            const nX = targetPos.x + dir.x * 1.5;
+            const nZ = targetPos.z + dir.z * 1.5;
+            if(Math.abs(nX) < 4.5 && Math.abs(nZ) < 4.5) { targetPos.x = nX; targetPos.z = nZ; }
+        }
+
+        function tick() {
+            if(isGameOver || win) return;
+            minute += 10;
+            if(minute >= 60) { minute = 0; hour++; }
+            document.getElementById('clock').innerText = `${hour.toString().padStart(2,'0')}:${minute.toString().padStart(2,'0')}`;
+            if(hour >= 6) { 
+                win = true; clearInterval(bgMusic);
+                document.getElementById('win-screen').style.display='flex'; 
+                document.getElementById('yoongi-window-layer').style.display='none';
+                // Музыка ПОБЕДЫ
+                const now = audioCtx.currentTime;
+                [261, 329, 392, 523].forEach((f, idx) => playNote(f, 'triangle', now + idx*0.2, 2, 0.1));
+            }
+        }
+
+        function attack() {
+            if(isGameOver || win) return;
+            document.getElementById('yoongi-img').style.opacity = '1';
+            document.getElementById('status').innerText = "КТО-ТО СМОТРИТ В ОКНО!";
+            setTimeout(() => {
+                if(win) return;
+                if(!isHidden) {
+                    isGameOver = true; clearInterval(bgMusic);
+                    document.getElementById('scare-overlay').style.display = 'block';
+                    document.getElementById('yoongi-window-layer').style.display = 'none';
+                    playNote(50, 'sawtooth', audioCtx.currentTime, 1, 0.5);
+                    setTimeout(() => { document.getElementById('berry-img').style.display = 'block'; }, 400);
+                } else {
+                    document.getElementById('yoongi-img').style.opacity = '0';
+                    document.getElementById('status').innerText = "Юнги ушел за новой партией ягод...";
+                }
+            }, 2800);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            camera.position.lerp(targetPos, 0.1);
+            if(gameStarted && !isGameOver) {
+                if (Math.abs(mouseX) > 0.3) lon += mouseX * 2.8;
+                if (Math.abs(mouseY) > 0.3) lat -= mouseY * 2.8;
+                const pos = new THREE.Vector3(0, 1.8, -4.8);
+                pos.project(camera);
+                const layer = document.getElementById('yoongi-window-layer');
+                layer.style.left = ((pos.x * 0.5 + 0.5) * window.innerWidth - 70) + 'px';
+                layer.style.top = ((pos.y * -0.5 + 0.5) * window.innerHeight - 90) + 'px';
+                const vector = new THREE.Vector3(0, 1.8, -4.8).applyMatrix4(camera.matrixWorldInverse);
+                layer.style.display = (vector.z > 0) ? 'none' : 'block';
+            }
+            lat = Math.max(-85, Math.min(85, lat));
+            let phi = (90 - lat) * (Math.PI / 180);
+            let theta = lon * (Math.PI / 180);
+            const t = new THREE.Vector3(
+                camera.position.x + Math.sin(phi) * Math.cos(theta),
+                camera.position.y + Math.cos(phi),
+                camera.position.z + Math.sin(phi) * Math.sin(theta)
+            );
+            camera.lookAt(t);
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
